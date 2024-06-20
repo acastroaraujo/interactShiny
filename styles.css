@@ -1,0 +1,11 @@
+
+.filter_components span {
+    margin-top: .25rem;
+    /*font-size: .8em; */
+    font-size: 20em;
+    color: #707782
+}
+
+.form-text,.help-text,.help-block {
+  font-size: 20em;
+}
