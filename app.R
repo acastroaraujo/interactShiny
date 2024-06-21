@@ -11,6 +11,18 @@ library(DT)
 library(histoslider)
 #source("utils.R")
 
+available_equations <- actdata::equations |> 
+  dplyr::filter(equation_type == "impressionabo") |> 
+  dplyr::select(key, group)
+
+available_dictionaries <- purrr::map(actdata::get_dicts(), \(x) x@groups)
+names(available_dictionaries) <- purrr::map_chr(actdata::get_dicts(), \(x) x@key)
+
+ok <- purrr::map(actdata::get_dicts(), \(x) x@components) |> 
+  purrr::map_lgl(\(x) all(c("identity", "behavior") %in% x))
+
+available_dictionaries <- available_dictionaries[ok]
+
 
 # Customize, print stuff from Aidan's package!
 
@@ -54,7 +66,8 @@ ui_dictionary <- bslib::card(
     bslib::navset_card_underline(
       bslib::nav_panel("Visual", bslib::card(full_screen = TRUE, plotly::plotlyOutput("epa3D"))),
       bslib::nav_panel("Spreadsheet", bslib::card(full_screen = TRUE, DT::dataTableOutput("spreadsheet")))
-    )
+    ),
+    shiny::uiOutput("source_info", inline = TRUE)
   )
 )
 
@@ -108,80 +121,20 @@ ui_analyze_events <- bslib::card(
   )
 )
 
-
 # customize ---------------------------------------------------------------
 
-# validate_dictionary <- function(x) {
-#   
-#   if (length(x) > 2) stop(call. = FALSE, "`dictionary` argument is malformed")
-#   if (length(x) == 1) {
-#     x[[2]] <- "all"
-#     cli::cli_bullets(c(">" = "dictionary = list(dataset = \"{x[[1]]}\", group = \"all\")"))
-#   }
-#   
-#   names(x) <- c("dataset", "group")
-#   
-#   dicts <- purrr::map(actdata::get_dicts(), \(x) x@groups)
-#   names(dicts) <- purrr::map_chr(get_dicts(), \(x) x@key)
-#   
-#   ok <- x[["dataset"]] %in% names(dicts)
-#   
-#   if (!ok) {
-#     cli::cli_abort("`{x[['dataset']]}` not found in {.pkg `actdata`} package", call = NULL)
-#   }
-#   
-#   groups <- dicts[[x[['dataset']]]]
-#   ok <- x[["group"]] %in% groups
-#   
-#   if (!ok) {
-#     cli::cli_alert_warning("`{x[['dataset']]}` groups: {groups}")
-#     cli::cli_abort("`{x['group']}` group not found in `{x[['dataset']]}` dictionary in {.pkg `actdata`} package", call = NULL)
-#   }
-#   
-#   return(x)
-#   
-# }
-# 
-# validate_equations <- function(x) {
-#   
-#   if (length(x) > 2) stop(call. = FALSE, "`equations` argument is malformed")
-#   if (length(x) == 1) {
-#     x[[2]] <- "all"
-#     cli::cli_bullets(c(">" = "equations = list(key = \"{x[[1]]}\", group = \"all\")"))
-#   }
-#   
-#   names(x) <- c("key", "group")
-#   
-#   sub_eq <- dplyr::filter(actdata::equations, .data$key == !!x[["key"]])
-#   
-#   if (!nrow(sub_eq) >= 1) {
-#     cli::cli_abort("`{x[['key']]}` not found in {.pkg `actdata`} package", call = NULL)
-#   }
-#   
-#   ok <- "impressionabo" %in% unique(sub_eq[["equation_type"]])
-#   
-#   if (!ok) {
-#     cli::cli_abort("`{x[['key']]}` must have an `impressionabo` equation type in {.pkg `actdata`}", call = NULL)
-#   }
-#   
-#   groups <- sub_eq[sub_eq$equation_type == "impressionabo", ][["group"]]
-#   ok <- x[["group"]] %in% groups
-#   
-#   if (!ok) {
-#     cli::cli_alert_warning("equations groups: {groups}")
-#     cli::cli_abort("`{x[['group']]}` not found in `{x[['key']]}` equations in {.pkg `actdata`} package", call = NULL)
-#   }
-#   
-#   return(x)
-#   
-# }
-# 
-# 
-# equations <- validate_equations(equations)
-# dictionary <- validate_dictionary(dictionary)
-# 
-# 
-# 
+ui_customize <- bslib::card(
+  bslib::layout_columns(
+    col_widths = c(6, 6),
+    bslib::card(
+      shiny::selectizeInput("dictionary", "Dictionary", choices = names(available_dictionaries), selected = "usfullsurveyor2015"),
+      shiny::selectizeInput("dictionary_subset", "Group", choices = "all"),
+      shiny::selectizeInput("equations", "Equations", choices = unique(available_equations$key), selected = "us2010"),
+      shiny::selectizeInput("equations_subset", "Group", choices = "all")
+    ),
+    bslib::card("Info")
+  )
+)
 
 
 ui <- bslib::page_navbar(
@@ -194,15 +147,31 @@ ui <- bslib::page_navbar(
   nav_panel(title = "Dictionary", ui_dictionary),
   nav_panel(title = "Solve", ui_solve),
   nav_panel(title = "Analyze Events", ui_analyze_events),
-  nav_panel(title = "Impression Change Equation", card(verbatimTextOutput("equationsPRINT"))),
-  nav_panel(title = "Customize", "Change Dictionary and Equations from the defaults")
+  nav_panel(title = "Impression Change Equation", card(uiOutput("equations_source_info"), verbatimTextOutput("equationsPRINT"))),
+  nav_panel(title = "Customize", ui_customize)
   
 )
 
 server <- function(input, output, session) {
   
+  ## Customize ---------------------------------------------------------------
   
-  ACT <- reactive(interact()) ## This is the most important line [!]
+  
+  observeEvent(input$dictionary, {
+    freezeReactiveValue(input, "dictionary_subset")
+    updateSelectizeInput(session, "dictionary_subset", label = "Group", choices = available_dictionaries[[input$dictionary]])
+  })
+  
+  observeEvent(input$equations, {
+    freezeReactiveValue(input, "equations_subset")
+    i <- with(available_equations, key == input$equations)
+    updateSelectizeInput(session, "equations_subset", label = "Group", choices = available_equations$group[i])
+  })
+  
+  ## This is the most important line [!]
+  ACT <- reactive({
+    interact(dictionary = list(input$dictionary, input$dictionary_subset), equations = list(input$equations, input$equations_subset))
+  }) 
   
   identities <- reactive({
 
@@ -214,7 +183,7 @@ server <- function(input, output, session) {
   })
   
   behaviors <- reactive({
-      
+    
     i <- ACT()$dictionary$component == "behavior"
     out <- ACT()$dictionary$term[i]
     names(out) <- gsub("_", " ", out)
@@ -288,8 +257,21 @@ server <- function(input, output, session) {
     updateActionButton(session, "init_restart", disabled = TRUE)
   })
   
+  # HERE situation ---------- 
   
+  situation <- reactive({
+    req(input$init_actor)
+    req(input$init_behavior)
+    req(input$init_object)
+    
+    actsims::start_situation(
+      init_event = list(A = input$init_actor, B = input$init_behavior, O = input$init_object), 
+      dictionary = list(input$dictionary, input$dictionary_subset),
+      equations = list(input$equations, input$equations_subset)
+    )
+  })
 
+  
   ## Solve -------------------------------------------------------------------
 
   observeEvent(list(identities(), behaviors()), {
@@ -401,6 +383,11 @@ server <- function(input, output, session) {
   
 
   ## Dictionary --------------------------------------------------------------
+  
+  output$source_info <- renderUI({
+    msg <- paste0("Source: ",input$dictionary, " (", input$dictionary_subset, ")")
+    helpText(msg, style = "font-size: 14px;")
+  })
   
   output$dict_filters <- renderUI({
     req(ACT())
@@ -529,14 +516,20 @@ server <- function(input, output, session) {
     
     ssd <- rowSums(sweep(fundamentals, MARGIN = 2, FUN = "-", unlist(epa))^2)
     i <- which(ssd <= input$closest_max_dist)
-    sort(ssd[i])
+    out <- sort(ssd[i])
     
-    data.frame(distance = sort(ssd[i]))
+    data.frame(distance = out, row.names = names(out))
     
   })
   
   
   ## Equations ---------------------------------------------------------------
+  
+  output$equations_source_info <- renderUI({
+    msg <- paste0("Source: ",input$equations, " (", input$equations_subset, ")")
+    helpText(msg, style = "font-size: 14px;")
+  })
+  
   
   output$equationsPRINT <- renderPrint({
     req(ACT())
@@ -544,20 +537,10 @@ server <- function(input, output, session) {
     ACT()$equations
     
   })
-
-
-  ## Customize ---------------------------------------------------------------
-
-  
-  
   
   
 }
   
-
-
-  
-
 
 shinyApp(ui, server)
 

@@ -1,0 +1,12 @@
+name: interactShiny
+title: interactShiny
+username: acastroaraujo
+account: acastroaraujo
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 12120765
+bundleId: 8769956
+url: https://acastroaraujo.shinyapps.io/interactShiny/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
